@@ -41,7 +41,7 @@
     let placedImages = [];              // 已完成图片
     let activeTransforms = [];          // 并行粒子动画 [{ particles, startTime, target }]
     const DURATION = 1200;              // 单次动画时长
-    const PAUSE_MS = 3000;              // 停笔等待时间（3秒）
+    const PAUSE_MS = 1000;              // 停笔等待时间（1秒）
     let pendingStrokes = [];            // 已画完等待变身的笔画
     let pauseTimer = null;              // 停笔计时器
 
@@ -196,15 +196,15 @@
         requestAnimationFrame(render);
     }
 
-    // ===== 把等待中的笔画变成图片 =====
+    // ===== 把等待中的所有笔画合并为一个变换 =====
     function flushPendingStrokes() {
         if (pauseTimer) { clearTimeout(pauseTimer); pauseTimer = null; }
         const strokes = pendingStrokes;
         pendingStrokes = [];
         if (!strokes.length) return;
-        for (const stroke of strokes) {
-            startTransform(stroke);
-        }
+        // 合并所有笔画为一个点集，统一计算大小
+        const merged = strokes.flat();
+        startTransform(merged);
     }
 
     // ===== 清空 =====
@@ -236,7 +236,7 @@
         // 重置计时器
         if (pauseTimer) clearTimeout(pauseTimer);
         pauseTimer = setTimeout(flushPendingStrokes, PAUSE_MS);
-        statusDiv.innerText = `✏️ 停笔 · ${pendingStrokes.length} 笔待变身 · 3s后自动生成`;
+        statusDiv.innerText = `✏️ 停笔 · ${pendingStrokes.length} 笔待变身 · 1s后自动生成`;
     }
 
     // 下笔 — 取消计时器，继续画
