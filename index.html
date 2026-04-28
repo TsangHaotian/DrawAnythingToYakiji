@@ -41,6 +41,9 @@
     let placedImages = [];              // 已完成图片
     let activeTransforms = [];          // 并行粒子动画 [{ particles, startTime, target }]
     const DURATION = 1200;              // 单次动画时长
+    const PAUSE_MS = 3000;              // 停笔等待时间（3秒）
+    let pendingStrokes = [];            // 已画完等待变身的笔画
+    let pauseTimer = null;              // 停笔计时器
 
     const statusDiv = document.getElementById('status');
     const clearBtn = document.getElementById('clearBtn');
@@ -185,14 +188,29 @@
             statusDiv.innerText = `✨ ${activeTransforms.length} 个重组中... ${avg}%`;
         }
 
-        // 3. 当前笔画
+        // 3. 已画完等待变身的笔画
+        for (const stroke of pendingStrokes) drawStroke(stroke);
+
+        // 4. 当前笔画
         if (currentStroke.length > 0) drawStroke(currentStroke);
         requestAnimationFrame(render);
     }
 
+    // ===== 把等待中的笔画变成图片 =====
+    function flushPendingStrokes() {
+        if (pauseTimer) { clearTimeout(pauseTimer); pauseTimer = null; }
+        const strokes = pendingStrokes;
+        pendingStrokes = [];
+        if (!strokes.length) return;
+        for (const stroke of strokes) {
+            startTransform(stroke);
+        }
+    }
+
     // ===== 清空 =====
     clearBtn.addEventListener('click', () => {
-        activeTransforms = []; placedImages = []; currentStroke = [];
+        if (pauseTimer) { clearTimeout(pauseTimer); pauseTimer = null; }
+        activeTransforms = []; placedImages = []; pendingStrokes = []; currentStroke = [];
         statusDiv.innerText = '🗑️ 已清空 ✨';
     });
 
@@ -206,15 +224,39 @@
         return { x: Math.min(Math.max(0, (cx - rect.left) * sx), canvas.width), y: Math.min(Math.max(0, (cy - rect.top) * sy), canvas.height) };
     }
 
-    // 画新笔触时不再打断粒子动画，直接开始画
-    canvas.addEventListener('mousedown', e => { e.preventDefault(); drawing = true; currentStroke = [getCoords(e)]; statusDiv.innerText = '✏️ 绘画中...'; });
+    // 提笔 — 存入等待列表，重置 3 秒计时
+    function onPenUp() {
+        if (!drawing) return;
+        drawing = false;
+        if (currentStroke.length) {
+            pendingStrokes.push(currentStroke);
+            currentStroke = [];
+        }
+        if (!pendingStrokes.length) return;
+        // 重置计时器
+        if (pauseTimer) clearTimeout(pauseTimer);
+        pauseTimer = setTimeout(flushPendingStrokes, PAUSE_MS);
+        statusDiv.innerText = `✏️ 停笔 · ${pendingStrokes.length} 笔待变身 · 3s后自动生成`;
+    }
+
+    // 下笔 — 取消计时器，继续画
+    function onPenDown(e) {
+        e.preventDefault();
+        if (pauseTimer) { clearTimeout(pauseTimer); pauseTimer = null; }
+        drawing = true;
+        currentStroke = [getCoords(e)];
+        const waiting = pendingStrokes.length;
+        statusDiv.innerText = waiting ? `✏️ 绘画中 · ${waiting} 笔待变身` : '✏️ 绘画中...';
+    }
+
+    canvas.addEventListener('mousedown', onPenDown);
     canvas.addEventListener('mousemove', e => { if (!drawing) return; e.preventDefault(); currentStroke.push(getCoords(e)); });
-    canvas.addEventListener('mouseup', () => { if (!drawing) return; drawing = false; if (currentStroke.length) { startTransform(currentStroke); currentStroke = []; } });
-    canvas.addEventListener('mouseleave', () => { if (!drawing) return; drawing = false; if (currentStroke.length) { startTransform(currentStroke); currentStroke = []; } });
-    canvas.addEventListener('touchstart', e => { e.preventDefault(); drawing = true; currentStroke = [getCoords(e)]; statusDiv.innerText = '✏️ 绘画中...'; });
-    canvas.addEventListener('touchmove', e => { if (!drawing) return; e.preventDefault(); currentStroke.push(getCoords(e)); });
-    canvas.addEventListener('touchend', () => { if (!drawing) return; drawing = false; if (currentStroke.length) { startTransform(currentStroke); currentStroke = []; } });
-    canvas.addEventListener('touchcancel', () => { if (!drawing) return; drawing = false; if (currentStroke.length) { startTransform(currentStroke); currentStroke = []; } });
+    canvas.addEventListener('mouseup', onPenUp);
+    canvas.addEventListener('mouseleave', onPenUp);
+    canvas.addEventListener('touchstart', onPenDown, { passive: false });
+    canvas.addEventListener('touchmove', e => { if (!drawing) return; e.preventDefault(); currentStroke.push(getCoords(e)); }, { passive: false });
+    canvas.addEventListener('touchend', onPenUp);
+    canvas.addEventListener('touchcancel', onPenUp);
 
     resize();
     render();
