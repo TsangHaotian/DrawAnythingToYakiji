@@ -13,6 +13,13 @@
         .toolbar button { pointer-events: auto; background: rgba(0,0,0,0.75); backdrop-filter: blur(10px); border: none; color: white; padding: 10px 20px; border-radius: 40px; font-size: 14px; font-weight: 500; cursor: pointer; transition: 0.2s; box-shadow: 0 2px 8px rgba(0,0,0,0.15); font-family: inherit; }
         .toolbar button:active { transform: scale(0.96); }
         #clearBtn { background: rgba(231, 76, 60, 0.9); }
+        .counter {
+            position: fixed; top: 16px; left: 16px; z-index: 100;
+            background: rgba(0,0,0,0.6); backdrop-filter: blur(8px);
+            color: rgba(255,255,255,0.8); padding: 6px 14px; border-radius: 20px;
+            font-size: 12px; line-height: 1.7; pointer-events: none;
+            font-family: 'Courier New', monospace; white-space: nowrap;
+        }
         .status { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.7); backdrop-filter: blur(8px); color: #fff; padding: 8px 20px; border-radius: 40px; font-size: 13px; font-weight: 500; z-index: 100; white-space: nowrap; pointer-events: none; }
         @media (max-width: 600px) {
             .toolbar button { padding: 8px 14px; font-size: 12px; }
@@ -23,6 +30,10 @@
 <body>
 <div class="canvas-container"><canvas id="canvas"></canvas></div>
 <div class="toolbar"><button id="clearBtn">🗑️ 清空</button></div>
+<div class="counter">
+    <span id="busuanzi_container_site_pv">👁️ <span id="busuanzi_value_site_pv"></span></span>
+    <span id="busuanzi_container_site_uv">| 👤 <span id="busuanzi_value_site_uv"></span></span>
+</div>
 <div class="status" id="status">🖼️ 加载图片中...</div>
 
 <script>
@@ -220,5 +231,7 @@
     render();
 })();
 </script>
+<script>var busuanzi_site_id = 'DrawAnythingToYakiji';</script>
+<script defer src="https://busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
 </body>
 </html>
