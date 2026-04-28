@@ -13,13 +13,6 @@
         .toolbar button { pointer-events: auto; background: rgba(0,0,0,0.75); backdrop-filter: blur(10px); border: none; color: white; padding: 10px 20px; border-radius: 40px; font-size: 14px; font-weight: 500; cursor: pointer; transition: 0.2s; box-shadow: 0 2px 8px rgba(0,0,0,0.15); font-family: inherit; }
         .toolbar button:active { transform: scale(0.96); }
         #clearBtn { background: rgba(231, 76, 60, 0.9); }
-        .counter {
-            position: fixed; top: 16px; left: 16px; z-index: 100;
-            background: rgba(0,0,0,0.6); backdrop-filter: blur(8px);
-            color: rgba(255,255,255,0.8); padding: 6px 14px; border-radius: 20px;
-            font-size: 12px; line-height: 1.7; pointer-events: none;
-            font-family: 'Courier New', monospace; white-space: nowrap;
-        }
         .status { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.7); backdrop-filter: blur(8px); color: #fff; padding: 8px 20px; border-radius: 40px; font-size: 13px; font-weight: 500; z-index: 100; white-space: nowrap; pointer-events: none; }
         @media (max-width: 600px) {
             .toolbar button { padding: 8px 14px; font-size: 12px; }
@@ -30,10 +23,6 @@
 <body>
 <div class="canvas-container"><canvas id="canvas"></canvas></div>
 <div class="toolbar"><button id="clearBtn">🗑️ 清空</button></div>
-<div class="counter">
-    <span id="busuanzi_container_site_pv">👁️ <span id="busuanzi_value_site_pv"></span></span>
-    <span id="busuanzi_container_site_uv">| 👤 <span id="busuanzi_value_site_uv"></span></span>
-</div>
 <div class="status" id="status">🖼️ 加载图片中...</div>
 
 <script>
@@ -49,17 +38,14 @@
     let drawing = false, currentStroke = [];
     const BRUSH_COLOR = '#000000';
     const BRUSH_SIZE = 3;
-    let placedImages = [];
-    let particles = [], isTransforming = false, transformStartTime = 0;
-    const DURATION = 1200;
-    let currentTarget = null;
+    let placedImages = [];              // 已完成图片
+    let activeTransforms = [];          // 并行粒子动画 [{ particles, startTime, target }]
+    const DURATION = 1200;              // 单次动画时长
 
     const statusDiv = document.getElementById('status');
     const clearBtn = document.getElementById('clearBtn');
 
     // ===== img/ 图片列表 =====
-    // ★ 图片按数字编号 1.png 2.png 3.png ... 放入 img/ 文件夹
-    // ★ 添加新图片后，把下面的数字改成最新的总数即可
     const IMAGE_COUNT = 12;
     const IMAGE_FILES = Array.from({ length: IMAGE_COUNT }, (_, i) => `${i + 1}.png`);
 
@@ -119,31 +105,42 @@
         return arr;
     }
 
+    // ===== 启动粒子变换（不打断已有动画） =====
     function startTransform(strokePoints) {
-        if (!strokePoints.length || !loaded || !sourceImages.length || isTransforming) return;
+        if (!strokePoints.length || !loaded || !sourceImages.length) return;
         const img = sourceImages[Math.floor(Math.random() * sourceImages.length)];
         const bounds = getBounds(strokePoints);
         const scale = Math.max(0.3, Math.max(bounds.width, bounds.height) / Math.max(img.width, img.height));
-        particles = createParticles(strokePoints, bounds, scale, img);
+        const particles = createParticles(strokePoints, bounds, scale, img);
         if (!particles.length) return;
-        currentTarget = { img, centerX: bounds.centerX, centerY: bounds.centerY, scale };
-        isTransforming = true;
-        transformStartTime = performance.now();
-        statusDiv.innerText = '✨ 粒子重组中... 0%';
+
+        activeTransforms.push({
+            particles,
+            startTime: performance.now(),
+            target: { img, centerX: bounds.centerX, centerY: bounds.centerY, scale }
+        });
+
+        const n = activeTransforms.length;
+        statusDiv.innerText = `✨ ${n} 个粒子重组中...`;
     }
 
     // ===== 渲染循环 =====
     function render() {
         ctx.clearRect(0, 0, w, h);
         drawWhiteBg();
+
+        // 1. 所有已完成的图片
         for (const item of placedImages) drawPlacedImage(item);
 
-        if (isTransforming && particles.length > 0) {
+        // 2. 所有并行的粒子动画
+        let completed = [];
+        for (let idx = 0; idx < activeTransforms.length; idx++) {
+            const t = activeTransforms[idx];
             const now = performance.now();
-            let p = Math.min(1, (now - transformStartTime) / DURATION);
+            let p = Math.min(1, (now - t.startTime) / DURATION);
             const ease = 1 - Math.pow(1 - p, 2.2);
 
-            for (let pt of particles) {
+            for (let pt of t.particles) {
                 pt.x = pt.startX + (pt.targetX - pt.startX) * ease;
                 pt.y = pt.startY + (pt.targetY - pt.startY) * ease;
                 if (p < 0.5) pt.life = 1 - p * 1.5;
@@ -157,28 +154,45 @@
             }
             ctx.globalAlpha = 1;
 
-            if (p > 0.5 && currentTarget) {
+            // 图片淡入
+            if (p > 0.5 && t.target) {
                 ctx.globalAlpha = (p - 0.5) / 0.5;
-                drawPlacedImage(currentTarget);
+                drawPlacedImage(t.target);
                 ctx.globalAlpha = 1;
             }
 
             if (p >= 0.98) {
-                isTransforming = false; particles = [];
-                if (currentTarget) { placedImages.push(currentTarget); currentTarget = null; }
-                statusDiv.innerText = `✅ ${placedImages.length} 张 · 继续画 ✨`;
-            } else {
-                statusDiv.innerText = `✨ 粒子重组中... ${Math.floor(p * 100)}%`;
+                completed.push(idx);
+                if (t.target) placedImages.push(t.target);
             }
         }
 
+        // 移除已完成的变换
+        if (completed.length > 0) {
+            activeTransforms = activeTransforms.filter((_, i) => !completed.includes(i));
+            if (activeTransforms.length > 0) {
+                statusDiv.innerText = `✨ ${activeTransforms.length} 个粒子重组中...`;
+            } else {
+                statusDiv.innerText = `✅ ${placedImages.length} 张 · 继续画 ✨`;
+            }
+        } else if (activeTransforms.length > 0) {
+            // 计算总进度
+            let total = 0;
+            for (const t of activeTransforms) {
+                total += Math.min(1, (performance.now() - t.startTime) / DURATION);
+            }
+            const avg = Math.floor((total / activeTransforms.length) * 100);
+            statusDiv.innerText = `✨ ${activeTransforms.length} 个重组中... ${avg}%`;
+        }
+
+        // 3. 当前笔画
         if (currentStroke.length > 0) drawStroke(currentStroke);
         requestAnimationFrame(render);
     }
 
     // ===== 清空 =====
     clearBtn.addEventListener('click', () => {
-        isTransforming = false; particles = []; currentTarget = null; placedImages = []; currentStroke = [];
+        activeTransforms = []; placedImages = []; currentStroke = [];
         statusDiv.innerText = '🗑️ 已清空 ✨';
     });
 
@@ -192,11 +206,12 @@
         return { x: Math.min(Math.max(0, (cx - rect.left) * sx), canvas.width), y: Math.min(Math.max(0, (cy - rect.top) * sy), canvas.height) };
     }
 
-    canvas.addEventListener('mousedown', e => { e.preventDefault(); if (isTransforming) { isTransforming = false; particles = []; currentTarget = null; } drawing = true; currentStroke = [getCoords(e)]; statusDiv.innerText = '✏️ 绘画中...'; });
+    // 画新笔触时不再打断粒子动画，直接开始画
+    canvas.addEventListener('mousedown', e => { e.preventDefault(); drawing = true; currentStroke = [getCoords(e)]; statusDiv.innerText = '✏️ 绘画中...'; });
     canvas.addEventListener('mousemove', e => { if (!drawing) return; e.preventDefault(); currentStroke.push(getCoords(e)); });
     canvas.addEventListener('mouseup', () => { if (!drawing) return; drawing = false; if (currentStroke.length) { startTransform(currentStroke); currentStroke = []; } });
     canvas.addEventListener('mouseleave', () => { if (!drawing) return; drawing = false; if (currentStroke.length) { startTransform(currentStroke); currentStroke = []; } });
-    canvas.addEventListener('touchstart', e => { e.preventDefault(); if (isTransforming) { isTransforming = false; particles = []; currentTarget = null; } drawing = true; currentStroke = [getCoords(e)]; statusDiv.innerText = '✏️ 绘画中...'; });
+    canvas.addEventListener('touchstart', e => { e.preventDefault(); drawing = true; currentStroke = [getCoords(e)]; statusDiv.innerText = '✏️ 绘画中...'; });
     canvas.addEventListener('touchmove', e => { if (!drawing) return; e.preventDefault(); currentStroke.push(getCoords(e)); });
     canvas.addEventListener('touchend', () => { if (!drawing) return; drawing = false; if (currentStroke.length) { startTransform(currentStroke); currentStroke = []; } });
     canvas.addEventListener('touchcancel', () => { if (!drawing) return; drawing = false; if (currentStroke.length) { startTransform(currentStroke); currentStroke = []; } });
@@ -205,6 +220,5 @@
     render();
 })();
 </script>
-<script defer src="https://busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
 </body>
 </html>
