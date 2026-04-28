@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>粒子画板 - 笔画变图片</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; -webkit-tap-highlight-color: transparent; }
+        body { background: #f5f5f5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; overflow: hidden; height: 100vh; width: 100vw; position: fixed; }
+        .canvas-container { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: white; }
+        canvas { display: block; width: 100%; height: 100%; cursor: crosshair; background: white; }
+        .toolbar { position: fixed; top: 16px; left: 0; right: 0; display: flex; justify-content: center; gap: 12px; z-index: 100; padding: 0 16px; pointer-events: none; }
+        .toolbar button { pointer-events: auto; background: rgba(0,0,0,0.75); backdrop-filter: blur(10px); border: none; color: white; padding: 10px 20px; border-radius: 40px; font-size: 14px; font-weight: 500; cursor: pointer; transition: 0.2s; box-shadow: 0 2px 8px rgba(0,0,0,0.15); font-family: inherit; }
+        .toolbar button:active { transform: scale(0.96); }
+        #clearBtn { background: rgba(231, 76, 60, 0.9); }
+        .status { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.7); backdrop-filter: blur(8px); color: #fff; padding: 8px 20px; border-radius: 40px; font-size: 13px; font-weight: 500; z-index: 100; white-space: nowrap; pointer-events: none; }
+        @media (max-width: 600px) {
+            .toolbar button { padding: 8px 14px; font-size: 12px; }
+            .status { font-size: 11px; bottom: 12px; }
+        }
+    </style>
+</head>
+<body>
+<div class="canvas-container"><canvas id="canvas"></canvas></div>
+<div class="toolbar"><button id="clearBtn">🗑️ 清空</button></div>
+<div class="status" id="status">🖼️ 加载图片中...</div>
+
+<script>
+(function() {
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    let w, h;
+    function resize() { w = window.innerWidth; h = window.innerHeight; canvas.width = w; canvas.height = h; }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // ===== 状态 =====
+    let drawing = false, currentStroke = [];
+    const BRUSH_COLOR = '#000000';
+    const BRUSH_SIZE = 3;
+    let placedImages = [];
+    let particles = [], isTransforming = false, transformStartTime = 0;
+    const DURATION = 1200;
+    let currentTarget = null;
+
+    const statusDiv = document.getElementById('status');
+    const clearBtn = document.getElementById('clearBtn');
+
+    // ===== img/ 图片列表 =====
+    // ★ 图片按数字编号 1.png 2.png 3.png ... 放入 img/ 文件夹
+    // ★ 添加新图片后，把下面的数字改成最新的总数即可
+    const IMAGE_COUNT = 12;
+    const IMAGE_FILES = Array.from({ length: IMAGE_COUNT }, (_, i) => `${i + 1}.png`);
+
+    const sourceImages = [];
+    let loaded = false, loadCount = 0;
+
+    IMAGE_FILES.forEach(file => {
+        const img = new Image();
+        const path = 'img/' + file;
+        img.onload = () => { sourceImages.push(img); loadCount++; if (loadCount === IMAGE_FILES.length) { loaded = true; statusDiv.innerText = '✏️ 随便画，粒子变身 ✨'; } };
+        img.onerror = () => { loadCount++; if (loadCount === IMAGE_FILES.length) { if (sourceImages.length > 0) { loaded = true; statusDiv.innerText = '✏️ 随便画，粒子变身 ✨'; } else statusDiv.innerText = '❌ 图片加载失败'; } };
+        img.src = path;
+    });
+
+    // ===== 绘图基础 =====
+    function drawWhiteBg() { ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, w, h); }
+
+    function drawStroke(points) {
+        if (!points.length) return;
+        ctx.save();
+        ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.lineWidth = BRUSH_SIZE;
+        ctx.strokeStyle = BRUSH_COLOR;
+        if (points.length === 1) { ctx.beginPath(); ctx.arc(points[0].x, points[0].y, BRUSH_SIZE/2, 0, Math.PI*2); ctx.fill(); }
+        else { ctx.beginPath(); ctx.moveTo(points[0].x, points[0].y); for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y); ctx.stroke(); }
+        ctx.restore();
+    }
+
+    function getBounds(points) {
+        if (!points.length) return { centerX: w/2, centerY: h/2, width: 100, height: 100 };
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (let p of points) { if (p.x < minX) minX = p.x; if (p.y < minY) minY = p.y; if (p.x > maxX) maxX = p.x; if (p.y > maxY) maxY = p.y; }
+        return { centerX: (minX + maxX) / 2, centerY: (minY + maxY) / 2, width: maxX - minX + 20, height: maxY - minY + 20 };
+    }
+
+    function drawPlacedImage(item) {
+        const dw = item.img.width * item.scale, dh = item.img.height * item.scale;
+        ctx.drawImage(item.img, item.centerX - dw / 2, item.centerY - dh / 2, dw, dh);
+    }
+
+    // ===== 粒子 =====
+    const PALETTE = ['#FF6B6B','#4ECDC4','#45B7D1','#96CEB4','#FFEAA7','#DDA0DD','#F7DC6F','#BB8FCE','#85C1E9','#F0B27A','#82E0AA','#F1948A'];
+
+    function createParticles(strokePoints, bounds, scale, img) {
+        const arr = [];
+        const imgW = img.width * scale, imgH = img.height * scale;
+        const left = bounds.centerX - imgW / 2, top = bounds.centerY - imgH / 2;
+        for (let p of strokePoints) {
+            const n = Math.floor(Math.random() * 6) + 3;
+            for (let i = 0; i < n; i++) arr.push({ x: p.x, y: p.y, startX: p.x, startY: p.y, targetX: left + Math.random() * imgW, targetY: top + Math.random() * imgH, color: PALETTE[Math.floor(Math.random() * PALETTE.length)], size: Math.random() * 4 + 2, life: 1.0 });
+        }
+        if (arr.length < 120) {
+            for (let i = 0; i < 180 - arr.length; i++) {
+                const sp = strokePoints[Math.floor(Math.random() * strokePoints.length)];
+                arr.push({ x: sp.x, y: sp.y, startX: sp.x, startY: sp.y, targetX: left + Math.random() * imgW, targetY: top + Math.random() * imgH, color: PALETTE[Math.floor(Math.random() * PALETTE.length)], size: Math.random() * 4 + 2, life: 1.0 });
+            }
+        }
+        return arr;
+    }
+
+    function startTransform(strokePoints) {
+        if (!strokePoints.length || !loaded || !sourceImages.length || isTransforming) return;
+        const img = sourceImages[Math.floor(Math.random() * sourceImages.length)];
+        const bounds = getBounds(strokePoints);
+        const scale = Math.max(0.3, Math.max(bounds.width, bounds.height) / Math.max(img.width, img.height));
+        particles = createParticles(strokePoints, bounds, scale, img);
+        if (!particles.length) return;
+        currentTarget = { img, centerX: bounds.centerX, centerY: bounds.centerY, scale };
+        isTransforming = true;
+        transformStartTime = performance.now();
+        statusDiv.innerText = '✨ 粒子重组中... 0%';
+    }
+
+    // ===== 渲染循环 =====
+    function render() {
+        ctx.clearRect(0, 0, w, h);
+        drawWhiteBg();
+        for (const item of placedImages) drawPlacedImage(item);
+
+        if (isTransforming && particles.length > 0) {
+            const now = performance.now();
+            let p = Math.min(1, (now - transformStartTime) / DURATION);
+            const ease = 1 - Math.pow(1 - p, 2.2);
+
+            for (let pt of particles) {
+                pt.x = pt.startX + (pt.targetX - pt.startX) * ease;
+                pt.y = pt.startY + (pt.targetY - pt.startY) * ease;
+                if (p < 0.5) pt.life = 1 - p * 1.5;
+                else pt.life = Math.max(0, (1 - p) / 0.5);
+                pt.life = Math.min(1, Math.max(0, pt.life));
+                ctx.globalAlpha = pt.life * 0.9;
+                ctx.beginPath();
+                ctx.arc(pt.x, pt.y, pt.size * (1 - p * 0.3), 0, Math.PI * 2);
+                ctx.fillStyle = pt.color;
+                ctx.fill();
+            }
+            ctx.globalAlpha = 1;
+
+            if (p > 0.5 && currentTarget) {
+                ctx.globalAlpha = (p - 0.5) / 0.5;
+                drawPlacedImage(currentTarget);
+                ctx.globalAlpha = 1;
+            }
+
+            if (p >= 0.98) {
+                isTransforming = false; particles = [];
+                if (currentTarget) { placedImages.push(currentTarget); currentTarget = null; }
+                statusDiv.innerText = `✅ ${placedImages.length} 张 · 继续画 ✨`;
+            } else {
+                statusDiv.innerText = `✨ 粒子重组中... ${Math.floor(p * 100)}%`;
+            }
+        }
+
+        if (currentStroke.length > 0) drawStroke(currentStroke);
+        requestAnimationFrame(render);
+    }
+
+    // ===== 清空 =====
+    clearBtn.addEventListener('click', () => {
+        isTransforming = false; particles = []; currentTarget = null; placedImages = []; currentStroke = [];
+        statusDiv.innerText = '🗑️ 已清空 ✨';
+    });
+
+    // ===== 输入 =====
+    function getCoords(e) {
+        const rect = canvas.getBoundingClientRect();
+        const sx = canvas.width / rect.width, sy = canvas.height / rect.height;
+        let cx, cy;
+        if (e.touches) { cx = e.touches[0].clientX; cy = e.touches[0].clientY; }
+        else { cx = e.clientX; cy = e.clientY; }
+        return { x: Math.min(Math.max(0, (cx - rect.left) * sx), canvas.width), y: Math.min(Math.max(0, (cy - rect.top) * sy), canvas.height) };
+    }
+
+    canvas.addEventListener('mousedown', e => { e.preventDefault(); if (isTransforming) { isTransforming = false; particles = []; currentTarget = null; } drawing = true; currentStroke = [getCoords(e)]; statusDiv.innerText = '✏️ 绘画中...'; });
+    canvas.addEventListener('mousemove', e => { if (!drawing) return; e.preventDefault(); currentStroke.push(getCoords(e)); });
+    canvas.addEventListener('mouseup', () => { if (!drawing) return; drawing = false; if (currentStroke.length) { startTransform(currentStroke); currentStroke = []; } });
+    canvas.addEventListener('mouseleave', () => { if (!drawing) return; drawing = false; if (currentStroke.length) { startTransform(currentStroke); currentStroke = []; } });
+    canvas.addEventListener('touchstart', e => { e.preventDefault(); if (isTransforming) { isTransforming = false; particles = []; currentTarget = null; } drawing = true; currentStroke = [getCoords(e)]; statusDiv.innerText = '✏️ 绘画中...'; });
+    canvas.addEventListener('touchmove', e => { if (!drawing) return; e.preventDefault(); currentStroke.push(getCoords(e)); });
+    canvas.addEventListener('touchend', () => { if (!drawing) return; drawing = false; if (currentStroke.length) { startTransform(currentStroke); currentStroke = []; } });
+    canvas.addEventListener('touchcancel', () => { if (!drawing) return; drawing = false; if (currentStroke.length) { startTransform(currentStroke); currentStroke = []; } });
+
+    resize();
+    render();
+})();
+</script>
+</body>
+</html>
