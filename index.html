@@ -52,15 +52,56 @@
     const IMAGE_COUNT = 12;
     const IMAGE_FILES = Array.from({ length: IMAGE_COUNT }, (_, i) => `${i + 1}.png`);
 
-    const sourceImages = [];
+    const imageDataList = [];           // [{ img, points: [{x,y,r,g,b}] }]
     let loaded = false, loadCount = 0;
+
+    // 快速像素采样（缩小图片后逐像素，数毫秒完成）
+    function samplePoints(img, maxPoints) {
+        maxPoints = maxPoints || 800;
+        const c = document.createElement('canvas');
+        const cx = c.getContext('2d');
+        const maxDim = 180;
+        const s = Math.min(1, maxDim / Math.max(img.width, img.height));
+        const w = Math.round(img.width * s), h = Math.round(img.height * s);
+        c.width = w; c.height = h;
+        cx.drawImage(img, 0, 0, w, h);
+        const data = cx.getImageData(0, 0, w, h).data;
+        const pts = [];
+        const step = 2;
+        for (let y = 0; y < h; y += step) {
+            for (let x = 0; x < w; x += step) {
+                const i = (y * w + x) * 4;
+                if (data[i+3] > 50 && (data[i] + data[i+1] + data[i+2]) > 30) {
+                    pts.push({ x, y, r: data[i], g: data[i+1], b: data[i+2] });
+                }
+            }
+        }
+        if (pts.length > maxPoints) {
+            for (let i = pts.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [pts[i], pts[j]] = [pts[j], pts[i]];
+            }
+            return pts.slice(0, maxPoints);
+        }
+        return pts;
+    }
 
     IMAGE_FILES.forEach(file => {
         const img = new Image();
-        const path = 'img/' + file;
-        img.onload = () => { sourceImages.push(img); loadCount++; if (loadCount === IMAGE_FILES.length) { loaded = true; statusDiv.innerText = '✏️ 随便画，粒子变身 ✨'; } };
-        img.onerror = () => { loadCount++; if (loadCount === IMAGE_FILES.length) { if (sourceImages.length > 0) { loaded = true; statusDiv.innerText = '✏️ 随便画，粒子变身 ✨'; } else statusDiv.innerText = '❌ 图片加载失败'; } };
-        img.src = path;
+        img.onload = () => {
+            const points = samplePoints(img);
+            imageDataList.push({ img, points });
+            loadCount++;
+            if (loadCount === IMAGE_FILES.length) { loaded = true; statusDiv.innerText = '✏️ 随便画，粒子变身 ✨'; }
+        };
+        img.onerror = () => {
+            loadCount++;
+            if (loadCount === IMAGE_FILES.length) {
+                if (imageDataList.length > 0) { loaded = true; statusDiv.innerText = '✏️ 随便画，粒子变身 ✨'; }
+                else statusDiv.innerText = '❌ 图片加载失败';
+            }
+        };
+        img.src = 'img/' + file;
     });
 
     // ===== 绘图基础 =====
@@ -79,7 +120,7 @@
     function getBounds(points) {
         if (!points.length) return { centerX: w/2, centerY: h/2, width: 100, height: 100 };
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        for (let p of points) { if (p.x < minX) minX = p.x; if (p.y < minY) minY = p.y; if (p.x > maxX) maxX = p.x; if (p.y > maxY) maxY = p.y; }
+        for (const p of points) { if (p.x < minX) minX = p.x; if (p.y < minY) minY = p.y; if (p.x > maxX) maxX = p.x; if (p.y > maxY) maxY = p.y; }
         return { centerX: (minX + maxX) / 2, centerY: (minY + maxY) / 2, width: maxX - minX + 20, height: maxY - minY + 20 };
     }
 
@@ -88,43 +129,75 @@
         ctx.drawImage(item.img, item.centerX - dw / 2, item.centerY - dh / 2, dw, dh);
     }
 
-    // ===== 粒子 =====
-    const PALETTE = ['#FF6B6B','#4ECDC4','#45B7D1','#96CEB4','#FFEAA7','#DDA0DD','#F7DC6F','#BB8FCE','#85C1E9','#F0B27A','#82E0AA','#F1948A'];
-
-    function createParticles(strokePoints, bounds, scale, img) {
+    // ===== 粒子（按图片轮廓重组） =====
+    function createParticles(strokePoints, targetPoints, bounds, scale) {
         const arr = [];
-        const imgW = img.width * scale, imgH = img.height * scale;
-        const left = bounds.centerX - imgW / 2, top = bounds.centerY - imgH / 2;
-        for (let p of strokePoints) {
-            const n = Math.floor(Math.random() * 6) + 3;
-            for (let i = 0; i < n; i++) arr.push({ x: p.x, y: p.y, startX: p.x, startY: p.y, targetX: left + Math.random() * imgW, targetY: top + Math.random() * imgH, color: PALETTE[Math.floor(Math.random() * PALETTE.length)], size: Math.random() * 4 + 2, life: 1.0 });
+        if (!strokePoints.length || !targetPoints.length) return arr;
+
+        const cx = bounds.centerX, cy = bounds.centerY;
+        let tMinX = Infinity, tMaxX = -Infinity, tMinY = Infinity, tMaxY = -Infinity;
+        for (const pt of targetPoints) {
+            if (pt.x < tMinX) tMinX = pt.x; if (pt.x > tMaxX) tMaxX = pt.x;
+            if (pt.y < tMinY) tMinY = pt.y; if (pt.y > tMaxY) tMaxY = pt.y;
         }
-        if (arr.length < 120) {
-            for (let i = 0; i < 180 - arr.length; i++) {
+        const tCx = (tMinX + tMaxX) / 2, tCy = (tMinY + tMaxY) / 2;
+
+        for (const p of strokePoints) {
+            const n = Math.floor(Math.random() * 5) + 3;
+            for (let i = 0; i < n; i++) {
+                const t = targetPoints[Math.floor(Math.random() * targetPoints.length)];
+                arr.push({
+                    x: p.x, y: p.y, startX: p.x, startY: p.y,
+                    targetX: cx + (t.x - tCx) * scale,
+                    targetY: cy + (t.y - tCy) * scale,
+                    color: `rgb(${t.r},${t.g},${t.b})`,
+                    size: Math.random() * 3 + 1.5,
+                    life: 1.0
+                });
+            }
+        }
+        if (arr.length < 150) {
+            for (let i = 0; i < 200 - arr.length; i++) {
                 const sp = strokePoints[Math.floor(Math.random() * strokePoints.length)];
-                arr.push({ x: sp.x, y: sp.y, startX: sp.x, startY: sp.y, targetX: left + Math.random() * imgW, targetY: top + Math.random() * imgH, color: PALETTE[Math.floor(Math.random() * PALETTE.length)], size: Math.random() * 4 + 2, life: 1.0 });
+                const t = targetPoints[Math.floor(Math.random() * targetPoints.length)];
+                arr.push({
+                    x: sp.x, y: sp.y, startX: sp.x, startY: sp.y,
+                    targetX: cx + (t.x - tCx) * scale,
+                    targetY: cy + (t.y - tCy) * scale,
+                    color: `rgb(${t.r},${t.g},${t.b})`,
+                    size: Math.random() * 3 + 1.5,
+                    life: 1.0
+                });
             }
         }
         return arr;
     }
 
-    // ===== 启动粒子变换（不打断已有动画） =====
+    // ===== 启动粒子变换 =====
     function startTransform(strokePoints) {
-        if (!strokePoints.length || !loaded || !sourceImages.length) return;
-        const img = sourceImages[Math.floor(Math.random() * sourceImages.length)];
+        if (!strokePoints.length || !loaded || !imageDataList.length) return;
+        const data = imageDataList[Math.floor(Math.random() * imageDataList.length)];
         const bounds = getBounds(strokePoints);
-        const scale = Math.max(0.3, Math.max(bounds.width, bounds.height) / Math.max(img.width, img.height));
-        const particles = createParticles(strokePoints, bounds, scale, img);
+
+        let tMinX = Infinity, tMaxX = -Infinity, tMinY = Infinity, tMaxY = -Infinity;
+        for (const pt of data.points) {
+            if (pt.x < tMinX) tMinX = pt.x; if (pt.x > tMaxX) tMaxX = pt.x;
+            if (pt.y < tMinY) tMinY = pt.y; if (pt.y > tMaxY) tMaxY = pt.y;
+        }
+        const targetSpan = Math.max(tMaxX - tMinX, tMaxY - tMinY) || 1;
+        const strokeSpan = Math.max(bounds.width, bounds.height);
+        const scale = Math.max(0.3, strokeSpan / targetSpan);
+
+        const particles = createParticles(strokePoints, data.points, bounds, scale);
         if (!particles.length) return;
 
         activeTransforms.push({
             particles,
             startTime: performance.now(),
-            target: { img, centerX: bounds.centerX, centerY: bounds.centerY, scale }
+            target: { img: data.img, centerX: bounds.centerX, centerY: bounds.centerY, scale }
         });
 
-        const n = activeTransforms.length;
-        statusDiv.innerText = `✨ ${n} 个粒子重组中...`;
+        statusDiv.innerText = `✨ ${activeTransforms.length} 个粒子重组中...`;
     }
 
     // ===== 渲染循环 =====
@@ -132,10 +205,8 @@
         ctx.clearRect(0, 0, w, h);
         drawWhiteBg();
 
-        // 1. 所有已完成的图片
         for (const item of placedImages) drawPlacedImage(item);
 
-        // 2. 所有并行的粒子动画
         let completed = [];
         for (let idx = 0; idx < activeTransforms.length; idx++) {
             const t = activeTransforms[idx];
@@ -143,7 +214,7 @@
             let p = Math.min(1, (now - t.startTime) / DURATION);
             const ease = 1 - Math.pow(1 - p, 2.2);
 
-            for (let pt of t.particles) {
+            for (const pt of t.particles) {
                 pt.x = pt.startX + (pt.targetX - pt.startX) * ease;
                 pt.y = pt.startY + (pt.targetY - pt.startY) * ease;
                 if (p < 0.5) pt.life = 1 - p * 1.5;
@@ -151,13 +222,12 @@
                 pt.life = Math.min(1, Math.max(0, pt.life));
                 ctx.globalAlpha = pt.life * 0.9;
                 ctx.beginPath();
-                ctx.arc(pt.x, pt.y, pt.size * (1 - p * 0.3), 0, Math.PI * 2);
+                ctx.arc(pt.x, pt.y, pt.size * (1 - p * 0.2), 0, Math.PI * 2);
                 ctx.fillStyle = pt.color;
                 ctx.fill();
             }
             ctx.globalAlpha = 1;
 
-            // 图片淡入
             if (p > 0.5 && t.target) {
                 ctx.globalAlpha = (p - 0.5) / 0.5;
                 drawPlacedImage(t.target);
@@ -170,7 +240,6 @@
             }
         }
 
-        // 移除已完成的变换
         if (completed.length > 0) {
             activeTransforms = activeTransforms.filter((_, i) => !completed.includes(i));
             if (activeTransforms.length > 0) {
@@ -179,32 +248,23 @@
                 statusDiv.innerText = `✅ ${placedImages.length} 张 · 继续画 ✨`;
             }
         } else if (activeTransforms.length > 0) {
-            // 计算总进度
             let total = 0;
-            for (const t of activeTransforms) {
-                total += Math.min(1, (performance.now() - t.startTime) / DURATION);
-            }
-            const avg = Math.floor((total / activeTransforms.length) * 100);
-            statusDiv.innerText = `✨ ${activeTransforms.length} 个重组中... ${avg}%`;
+            for (const t of activeTransforms) total += Math.min(1, (performance.now() - t.startTime) / DURATION);
+            statusDiv.innerText = `✨ ${activeTransforms.length} 个重组中... ${Math.floor((total / activeTransforms.length) * 100)}%`;
         }
 
-        // 3. 已画完等待变身的笔画
         for (const stroke of pendingStrokes) drawStroke(stroke);
-
-        // 4. 当前笔画
         if (currentStroke.length > 0) drawStroke(currentStroke);
         requestAnimationFrame(render);
     }
 
-    // ===== 把等待中的所有笔画合并为一个变换 =====
+    // ===== 合并笔画统一变换 =====
     function flushPendingStrokes() {
         if (pauseTimer) { clearTimeout(pauseTimer); pauseTimer = null; }
         const strokes = pendingStrokes;
         pendingStrokes = [];
         if (!strokes.length) return;
-        // 合并所有笔画为一个点集，统一计算大小
-        const merged = strokes.flat();
-        startTransform(merged);
+        startTransform(strokes.flat());
     }
 
     // ===== 清空 =====
@@ -224,29 +284,22 @@
         return { x: Math.min(Math.max(0, (cx - rect.left) * sx), canvas.width), y: Math.min(Math.max(0, (cy - rect.top) * sy), canvas.height) };
     }
 
-    // 提笔 — 存入等待列表，重置 3 秒计时
     function onPenUp() {
         if (!drawing) return;
         drawing = false;
-        if (currentStroke.length) {
-            pendingStrokes.push(currentStroke);
-            currentStroke = [];
-        }
+        if (currentStroke.length) { pendingStrokes.push(currentStroke); currentStroke = []; }
         if (!pendingStrokes.length) return;
-        // 重置计时器
         if (pauseTimer) clearTimeout(pauseTimer);
         pauseTimer = setTimeout(flushPendingStrokes, PAUSE_MS);
         statusDiv.innerText = `✏️ 停笔 · ${pendingStrokes.length} 笔待变身 · 1s后自动生成`;
     }
 
-    // 下笔 — 取消计时器，继续画
     function onPenDown(e) {
         e.preventDefault();
         if (pauseTimer) { clearTimeout(pauseTimer); pauseTimer = null; }
         drawing = true;
         currentStroke = [getCoords(e)];
-        const waiting = pendingStrokes.length;
-        statusDiv.innerText = waiting ? `✏️ 绘画中 · ${waiting} 笔待变身` : '✏️ 绘画中...';
+        statusDiv.innerText = pendingStrokes.length ? `✏️ 绘画中 · ${pendingStrokes.length} 笔待变身` : '✏️ 绘画中...';
     }
 
     canvas.addEventListener('mousedown', onPenDown);
