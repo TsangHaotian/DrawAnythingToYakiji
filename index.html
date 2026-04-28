@@ -178,23 +178,28 @@
         if (!strokePoints.length || !loaded || !imageDataList.length) return;
         const data = imageDataList[Math.floor(Math.random() * imageDataList.length)];
         const bounds = getBounds(strokePoints);
+        const strokeSpan = Math.max(bounds.width, bounds.height);
 
+        // 粒子用采样坐标空间算缩放
         let tMinX = Infinity, tMaxX = -Infinity, tMinY = Infinity, tMaxY = -Infinity;
         for (const pt of data.points) {
             if (pt.x < tMinX) tMinX = pt.x; if (pt.x > tMaxX) tMaxX = pt.x;
             if (pt.y < tMinY) tMinY = pt.y; if (pt.y > tMaxY) tMaxY = pt.y;
         }
         const targetSpan = Math.max(tMaxX - tMinX, tMaxY - tMinY) || 1;
-        const strokeSpan = Math.max(bounds.width, bounds.height);
-        const scale = Math.max(0.3, strokeSpan / targetSpan);
+        const particleScale = strokeSpan / targetSpan;
 
-        const particles = createParticles(strokePoints, data.points, bounds, scale);
+        // 图片用原始尺寸算缩放（让图片大小匹配笔画大小）
+        const imgSpan = Math.max(data.img.width, data.img.height);
+        const drawScale = Math.max(0.2, strokeSpan / imgSpan);
+
+        const particles = createParticles(strokePoints, data.points, bounds, particleScale);
         if (!particles.length) return;
 
         activeTransforms.push({
             particles,
             startTime: performance.now(),
-            target: { img: data.img, centerX: bounds.centerX, centerY: bounds.centerY, scale }
+            target: { img: data.img, centerX: bounds.centerX, centerY: bounds.centerY, scale: drawScale }
         });
 
         statusDiv.innerText = `✨ ${activeTransforms.length} 个粒子重组中...`;
