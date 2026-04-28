@@ -40,6 +40,13 @@
         .toolbar button { pointer-events: auto; background: rgba(0,0,0,0.75); backdrop-filter: blur(10px); border: none; color: white; padding: 10px 20px; border-radius: 40px; font-size: 14px; font-weight: 500; cursor: pointer; transition: 0.2s; box-shadow: 0 2px 8px rgba(0,0,0,0.15); font-family: inherit; }
         .toolbar button:active { transform: scale(0.96); }
         #clearBtn { background: rgba(231, 76, 60, 0.9); }
+        .credit {
+            position: fixed; top: 16px; left: 16px; z-index: 100;
+            font-size: 11px; color: rgba(0,0,0,0.25);
+            font-family: 'Courier New', monospace;
+            line-height: 1.5; pointer-events: none;
+            letter-spacing: 0.3px;
+        }
         .status { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.7); backdrop-filter: blur(8px); color: #fff; padding: 8px 20px; border-radius: 40px; font-size: 13px; font-weight: 500; z-index: 100; white-space: nowrap; pointer-events: none; }
         @media (max-width: 600px) {
             .toolbar button { padding: 8px 14px; font-size: 12px; }
@@ -60,6 +67,7 @@
 <div class="canvas-container"><canvas id="canvas"></canvas></div>
 <div class="toolbar"><button id="clearBtn">🗑️ 清空</button></div>
 <div class="status" id="status">🖼️ 加载图片中...</div>
+<div class="credit">TsangHaotian · github.com/TsangHaotian/DrawAnythingToYakiji</div>
 
 <script>
 (function() {
@@ -246,7 +254,7 @@
 
         // 图片用原始尺寸算缩放（让图片大小匹配笔画大小）
         const imgSpan = Math.max(data.img.width, data.img.height);
-        const drawScale = Math.max(0.2, strokeSpan / imgSpan);
+        const drawScale = strokeSpan / imgSpan;
 
         const particles = createParticles(strokePoints, data.points, bounds, particleScale);
         if (!particles.length) return;
