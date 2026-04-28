@@ -31,7 +31,8 @@
 <div class="canvas-container"><canvas id="canvas"></canvas></div>
 <div class="toolbar"><button id="clearBtn">🗑️ 清空</button></div>
 <div class="counter">
-    👁️ <span id="busuanzi_value_site_pv">0</span> | 👤 <span id="busuanzi_value_site_uv">0</span>
+    <span id="busuanzi_container_site_pv">👁️ <span id="busuanzi_value_site_pv"></span></span>
+    <span id="busuanzi_container_site_uv">| 👤 <span id="busuanzi_value_site_uv"></span></span>
 </div>
 <div class="status" id="status">🖼️ 加载图片中...</div>
 
@@ -204,6 +205,6 @@
     render();
 })();
 </script>
-<script async src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
+<script defer src="https://busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
 </body>
 </html>
