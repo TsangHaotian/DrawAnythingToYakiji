@@ -133,6 +133,24 @@
         return pts;
     }
 
+    // 当 getImageData 被安全策略禁止时（如 file://），用网格生成占位点
+    function generateFallbackPoints(img, maxPoints) {
+        maxPoints = maxPoints || 800;
+        const maxDim = 180;
+        const s = Math.min(1, maxDim / Math.max(img.width, img.height));
+        const w = Math.round(img.width * s) || 1, h = Math.round(img.height * s) || 1;
+        const pts = [];
+        const step = Math.max(1, Math.ceil(Math.sqrt((w * h) / maxPoints)));
+        for (let y = 1; y < h; y += step) {
+            for (let x = 1; x < w; x += step) {
+                pts.push({ x, y, r: 80, g: 80, b: 80 });
+                if (pts.length >= maxPoints) break;
+            }
+            if (pts.length >= maxPoints) break;
+        }
+        return pts;
+    }
+
     function updateLoader() {
         const pct = Math.round((loadCount / IMAGE_FILES.length) * 100);
         loaderText.innerText = `${loadCount} / ${IMAGE_FILES.length}`;
@@ -150,8 +168,13 @@
     IMAGE_FILES.forEach(file => {
         const img = new Image();
         img.onload = () => {
-            const points = samplePoints(img);
-            imageDataList.push({ img, points });
+            try {
+                const points = samplePoints(img);
+                imageDataList.push({ img, points });
+            } catch(e) {
+                // getImageData 因安全策略被禁止（file:// 协议），用网格点阵回退
+                imageDataList.push({ img, points: generateFallbackPoints(img) });
+            }
             loadCount++;
             updateLoader();
             if (loadCount === IMAGE_FILES.length) finishLoad();
@@ -205,6 +228,12 @@
         let xx = 0, xy = 0, yy = 0;
         for (const p of points) { const dx = p.x - cx, dy = p.y - cy; xx += dx * dx; xy += dx * dy; yy += dy * dy; }
         xx /= points.length; xy /= points.length; yy /= points.length;
+        // 特征值比值 — 判断笔画是否明显 elongated
+        const d = Math.sqrt((xx - yy) * (xx - yy) + 4 * xy * xy);
+        const trace = xx + yy;
+        if (trace < 1) return 0;  // 几乎是个点
+        const ratio = (trace + d) / (trace - d);
+        if (ratio < 2.5) return 0; // 没有明确主方向，不旋转
         return 0.5 * Math.atan2(2 * xy, xx - yy);
     }
 
@@ -275,7 +304,9 @@
         const imgSpan = Math.max(data.img.width, data.img.height);
         const drawScale = strokeSpan / imgSpan;
 
-        const angle = getStrokeAngle(strokePoints);
+        let angle = getStrokeAngle(strokePoints);
+        // 调整图片方向：让图片长边对齐笔画主方向
+        if (angle !== 0 && data.img.width < data.img.height) angle -= Math.PI / 2;
         const particles = createParticles(strokePoints, data.points, bounds, particleScale, angle);
         if (!particles.length) return;
 
