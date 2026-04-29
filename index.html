@@ -309,6 +309,9 @@
         let angle = getStrokeAngle(strokePoints);
         // 调整图片方向：让图片长边对齐笔画主方向
         if (angle !== 0 && data.img.width < data.img.height) angle -= Math.PI / 2;
+        // 约束到 [-π/2, π/2] 防止倒置
+        if (angle > Math.PI / 2) angle -= Math.PI;
+        else if (angle < -Math.PI / 2) angle += Math.PI;
         const particles = createParticles(strokePoints, data.points, bounds, particleScale, angle);
         if (!particles.length) return;
 
