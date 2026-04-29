@@ -100,6 +100,7 @@
     const IMAGE_FILES = Array.from({ length: IMAGE_COUNT }, (_, i) => `${i + 1}.png`);
 
     const imageDataList = [];           // [{ img, points: [{x,y,r,g,b}] }]
+    let nextImageIndex = 0;
     let loaded = false, loadCount = 0;
 
     // 快速像素采样（缩小图片后逐像素，数毫秒完成）
@@ -287,7 +288,8 @@
     // ===== 启动粒子变换 =====
     function startTransform(strokePoints) {
         if (!strokePoints.length || !loaded || !imageDataList.length) return;
-        const data = imageDataList[Math.floor(Math.random() * imageDataList.length)];
+        const data = imageDataList[nextImageIndex];
+        nextImageIndex = (nextImageIndex + 1) % imageDataList.length;
         const bounds = getBounds(strokePoints);
         const strokeSpan = Math.max(bounds.width, bounds.height);
 
