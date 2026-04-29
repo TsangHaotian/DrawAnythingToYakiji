@@ -188,12 +188,28 @@
     }
 
     function drawPlacedImage(item) {
+        ctx.save();
+        ctx.translate(item.centerX, item.centerY);
+        if (item.angle) ctx.rotate(item.angle);
         const dw = item.img.width * item.scale, dh = item.img.height * item.scale;
-        ctx.drawImage(item.img, item.centerX - dw / 2, item.centerY - dh / 2, dw, dh);
+        ctx.drawImage(item.img, -dw / 2, -dh / 2, dw, dh);
+        ctx.restore();
+    }
+
+    // ===== 主成分分析计算笔画角度 =====
+    function getStrokeAngle(points) {
+        if (points.length < 3) return 0;
+        let cx = 0, cy = 0;
+        for (const p of points) { cx += p.x; cy += p.y; }
+        cx /= points.length; cy /= points.length;
+        let xx = 0, xy = 0, yy = 0;
+        for (const p of points) { const dx = p.x - cx, dy = p.y - cy; xx += dx * dx; xy += dx * dy; yy += dy * dy; }
+        xx /= points.length; xy /= points.length; yy /= points.length;
+        return 0.5 * Math.atan2(2 * xy, xx - yy);
     }
 
     // ===== 粒子（按图片轮廓重组） =====
-    function createParticles(strokePoints, targetPoints, bounds, scale) {
+    function createParticles(strokePoints, targetPoints, bounds, scale, angle) {
         const arr = [];
         if (!strokePoints.length || !targetPoints.length) return arr;
 
@@ -209,10 +225,13 @@
             const n = Math.floor(Math.random() * 5) + 3;
             for (let i = 0; i < n; i++) {
                 const t = targetPoints[Math.floor(Math.random() * targetPoints.length)];
+                const dx = (t.x - tCx) * scale, dy = (t.y - tCy) * scale;
+                const rx = dx * Math.cos(angle) - dy * Math.sin(angle);
+                const ry = dx * Math.sin(angle) + dy * Math.cos(angle);
                 arr.push({
                     x: p.x, y: p.y, startX: p.x, startY: p.y,
-                    targetX: cx + (t.x - tCx) * scale,
-                    targetY: cy + (t.y - tCy) * scale,
+                    targetX: cx + rx,
+                    targetY: cy + ry,
                     color: `rgb(${t.r},${t.g},${t.b})`,
                     size: Math.random() * 3 + 1.5,
                     life: 1.0
@@ -225,8 +244,8 @@
                 const t = targetPoints[Math.floor(Math.random() * targetPoints.length)];
                 arr.push({
                     x: sp.x, y: sp.y, startX: sp.x, startY: sp.y,
-                    targetX: cx + (t.x - tCx) * scale,
-                    targetY: cy + (t.y - tCy) * scale,
+                    targetX: cx + (t.x - tCx) * scale * Math.cos(angle) - (t.y - tCy) * scale * Math.sin(angle),
+                    targetY: cy + (t.x - tCx) * scale * Math.sin(angle) + (t.y - tCy) * scale * Math.cos(angle),
                     color: `rgb(${t.r},${t.g},${t.b})`,
                     size: Math.random() * 3 + 1.5,
                     life: 1.0
@@ -256,13 +275,14 @@
         const imgSpan = Math.max(data.img.width, data.img.height);
         const drawScale = strokeSpan / imgSpan;
 
-        const particles = createParticles(strokePoints, data.points, bounds, particleScale);
+        const angle = getStrokeAngle(strokePoints);
+        const particles = createParticles(strokePoints, data.points, bounds, particleScale, angle);
         if (!particles.length) return;
 
         activeTransforms.push({
             particles,
             startTime: performance.now(),
-            target: { img: data.img, centerX: bounds.centerX, centerY: bounds.centerY, scale: drawScale }
+            target: { img: data.img, centerX: bounds.centerX, centerY: bounds.centerY, scale: drawScale, angle }
         });
 
         statusDiv.innerText = `✨ ${activeTransforms.length} 个粒子重组中...`;
